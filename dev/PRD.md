@@ -16,7 +16,7 @@ Every day, automatically check a list of event pages and text the user a summary
   - No events are added to the calendar that the user didn't explicitly approve via their reply.
 
 ## 4. Non-Goals (v1)
-- No deduplication / history tracking — each day's digest is self-contained (today's events only), so there's nothing to dedupe against.
+- No deduplication of events across days — each day's digest is self-contained (today's events only). A rolling log is kept (see §6.2) for context/audit and to support reply-matching, but it does not feed back into filtering what's shown in future digests.
 - No multi-user support.
 - No public distribution / skill marketplace packaging.
 - No non-Google calendar support.
@@ -36,24 +36,30 @@ Built on **Claude Code Routines** (Anthropic's scheduled cloud agents) rather th
 - Official Twilio MCP connector exists for SMS — no custom hosting needed for messaging.
 
 ### 6.2 Components
-1. **Source list** — a maintained list of event page URLs (start with 3–5 sites).
-2. **Routine A (scheduled trigger)** — fetches each source page, extracts today's events (title, time, location, link) via prompt, filters by relevance/interest, formats a digest, and sends it via the **Twilio MCP connector** (official Twilio-Claude integration, installed via Claude Code `/plugins` → `twilio-developer-kit`, or Connectors directory).
+1. **Data store (Airtable)** — holds all personal/user-specific data, kept out of the (public) repo entirely:
+   - **Sources table** — org/group name → event page URL. Editable directly in Airtable as the source list changes over time.
+   - **Event log table** — rolling ~7-day log of events recommended in each day's digest and which ones were added to the calendar, kept for context/audit (not used for dedup — see §4).
+   - Accessed via the official **Airtable MCP connector** (read/write), attached to both routines. Scope is limited to the one dedicated base via OAuth base-selection at connector setup — low risk relative to Calendar/Twilio-send scopes.
+2. **Routine A (scheduled trigger)** — reads the sources table, fetches each source page, extracts today's events (title, time, location, link) via prompt, filters by relevance/interest, formats a digest, sends it via the **Twilio MCP connector** (official Twilio-Claude integration, installed via Claude Code `/plugins` → `twilio-developer-kit`, or Connectors directory), and logs the recommended events to the event log table.
 3. **Twilio Studio Flow** — receives the user's inbound SMS reply and forwards it (via an HTTP Request widget) to Routine B's API-trigger endpoint. Inbound handling lives here, not in the MCP connector.
-4. **Routine B (API trigger)** — fires on the Studio Flow's request, parses the freeform reply text to identify the intended event, and creates it on a single, dedicated Google Calendar (e.g., "Events").
+4. **Routine B (API trigger)** — fires on the Studio Flow's request, reads the event log table to resolve which event the freeform reply refers to, creates it on a single, dedicated Google Calendar (e.g., "Events"), and logs the addition back to the event log table.
 5. **Connectors used:**
    - **Google Calendar** — attached only to Routine B; scoped as narrowly as possible while still allowing event creation. (See open question on single-calendar restriction.)
    - **Gmail** — optional in v1, not required for the core loop (no email-sourced events planned yet). If added later, connect as `gmail.readonly` only — never grant send/draft/trash scopes.
    - **Twilio** — attached only to Routine A, for sending the digest. Inbound replies are handled by the Studio Flow, not this connector.
+   - **Airtable** — attached to both routines, for the sources table and event log (see #1 above).
 
 ### 6.3 Data flow
 **Digest (daily, scheduled):**
 ```
 Routine fires (cron) 
+  → Airtable connector reads sources table 
   → browse each source URL 
   → extract today's events 
   → filter by relevance 
   → format message 
-  → Twilio connector sends SMS
+  → Twilio connector sends SMS 
+  → Airtable connector logs recommended events to event log table
 ```
 
 **Reply (event-driven):**
@@ -63,8 +69,9 @@ User replies to SMS
   → Studio Flow: Make HTTP Request widget POSTs to Routine B's API-trigger endpoint 
     (with Authorization bearer token + anthropic-beta header, reply text as freeform payload) 
   → Routine B fires as a new, independent autonomous session 
-  → Routine B's prompt parses the freeform reply text to identify which event was meant 
-  → Calendar connector creates event on the dedicated "Events" calendar
+  → Airtable connector reads the event log table to resolve which event the reply means 
+  → Calendar connector creates event on the dedicated "Events" calendar 
+  → Airtable connector logs the calendar addition back to the event log table
 ```
 
 The Twilio Studio Flow is the bridge between the inbound SMS and the routine — it's a no-code flow built entirely within the existing Twilio account (drag-and-drop, two widgets), not a separately hosted service. Free for the first 1,000 executions/month ($0.0025/execution after), which comfortably covers daily use.
@@ -80,6 +87,7 @@ This is required because Claude Code Routines run fully autonomously with **no a
 - **Calendar:** connect with the narrowest scope that still allows event creation; direct all writes to one dedicated calendar, not the user's primary calendar. Only Routine B (calendar write) has this connector attached — Routine A (digest) does not need it.
 - **Gmail (if/when added):** `gmail.readonly` only. Never connect send/draft-capable scopes. Not attached to either routine in v1.
 - **Twilio:** credentials via the official connector's own credential handling (not a self-managed flat file). Only Routine A (digest) needs send capability; Routine B doesn't need Twilio at all.
+- **Airtable:** OAuth-scoped to a single dedicated base at connector setup. Keeps all personal data (source list, event log) out of the public repo entirely. Attached to both routines — acceptable since it's read/write of records/files only, not comparable in risk to Calendar or Twilio-send scopes.
 - No AWS/EC2, no self-hosted credential store, no general-purpose "hands on the machine" agent framework (i.e., not OpenClaw) — smaller surface area by design.
 
 ### 6.5 Hosting
@@ -89,6 +97,7 @@ None required. The digest flow runs fully on Claude's managed infrastructure. Th
 - Claude Pro: $20/mo (existing plan) — expected to cover 1 routine run/day comfortably.
 - Twilio: ~$1–2/mo number rental + ~$0.0079/SMS — negligible at this volume.
 - Twilio Studio: free for the first 1,000 flow executions/month, $0.0025/execution after — negligible at one reply/day.
+- Airtable: free tier ($0/mo) — well within limits at this volume (1,000 records/base, 1,000 API calls/month; usage here is ~5–10 calls/day, ~150–300/month).
 - No AWS/hosting cost under this design.
 
 ---
@@ -97,4 +106,4 @@ None required. The digest flow runs fully on Claude's managed infrastructure. Th
 1. ~~**Reply-trigger bridge**~~ — **Resolved:** use a Twilio Studio Flow (Trigger widget on incoming SMS → Make HTTP Request widget posting to the routine's API-trigger endpoint). Native to Twilio, no custom code or hosting. Still to confirm in practice: the exact request format/headers the routine's API trigger expects, and that Studio's HTTP Request widget can supply them correctly.
 2. **Single-calendar restriction:** Google's Calendar OAuth scopes are not restricted to one calendar by default (`calendar`/`calendar.events` grant access across all calendars on the account). Need to check, at connector setup time in Claude's Settings → Connectors, whether there's a calendar-selection step that limits access to just the one dedicated calendar — this wasn't confirmed in research.
 3. ~~**Approval-gate behavior in unattended routines**~~ — **Resolved:** confirmed via Anthropic's docs that routines never pause for approval during a run (no permission prompts at all). Design updated to use two separate routines (digest vs. calendar-write), where Routine B only ever runs when triggered by the user's reply — that external trigger is the safeguard, not an in-run approval step. A mobile push-notification/tap-to-approve flow was considered and ruled out: it depends on interactive Remote Control sessions, which routines are not.
-4. **Source list format/location:** not yet decided where the list of event page URLs lives (repo file vs. routine config).
+4. ~~**Source list format/location**~~ — **Resolved:** Airtable (sources table), not the repo. Keeps personal data out of the public repo — a repo file would either be public (unacceptable) or gitignored, which doesn't work anyway since a routine's cloud checkout only reflects what's actually pushed to the remote, not local-only files.
