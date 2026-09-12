@@ -45,6 +45,7 @@ Built on **Claude Code Routines** (Anthropic's scheduled cloud agents) rather th
    - **Gmail** — attached to the routine, with **send** scope (needed to email the digest). This is a deliberate change from an earlier, more conservative design that avoided any send-capable scope — the safeguard is now prompt-level (the routine is only ever instructed to send to the user's own address), not OAuth-level.
    - **Airtable** — attached to the routine, for the sources table and event log (see #1 above).
    - **Google Calendar** — not attached to any routine. The calendar write is entirely client-side (see #3), which removes the OAuth-scope risk this connector used to carry entirely.
+5. **Setup skill (`setup-events-daily`)** — one-time, manually-invoked skill (not a routine) that verifies/creates the Airtable base and tables, confirms the connectors in #4 are attached correctly, ensures the "Events" Google Calendar exists, and seeds the `Sources` table with at least one URL. Run once before the first `run-events-daily` execution; re-run only if connectors are reconnected or the Airtable base is recreated. It also carries a routine-creation finding: skill slash-commands don't resolve inside routine sessions, so the daily routine's prompt must literally say "Read the file `.claude/skills/run-events-daily/SKILL.md`..." rather than invoking the skill by name.
 
 ### 6.3 Data flow
 ```
