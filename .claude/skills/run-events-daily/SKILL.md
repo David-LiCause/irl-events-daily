@@ -3,6 +3,8 @@ name: run-events-daily
 description: Fetches today's events from every configured source, emails the user a full digest with a one-click Google Calendar "Add to Calendar" link per event, and logs the results to Airtable.
 ---
 
+**This is a prescriptive, step-by-step workflow.** Execute the steps below in order, one at a time — do not skip ahead, reorder, or run steps in parallel. Before moving to the next step, confirm the current one actually completed. If any step is incomplete or cannot be completed (a connector won't connect, a command fails, required info is missing), **stop immediately and flag it to the user** — do not improvise a workaround or continue past it.
+
 1. **Determine today's date.** Resolve the current date in **America/New_York** (not UTC — the cloud environment clock is UTC): run `TZ=America/New_York date +%Y-%m-%d` via Bash. Use this single value for the rest of the run to decide "is this event today."
 
 2. **Pull sources from Airtable.** Read **every** row of the `Sources` table via the Airtable connector. For each row, capture `Name` and `URL`.
@@ -49,8 +51,10 @@ description: Fetches today's events from every configured source, emails the use
    ```
    This validates `events.json`, builds a Google Calendar quick-add URL for each event, and renders the email into `digest_output.json` (`{"subject": ..., "body": ...}`). If it exits non-zero, fix the offending event data in `events.json` and rerun — do not proceed to send with unvalidated data.
 
-7. **Send the email.** Read `digest_output.json` and send its `subject`/`body` **verbatim** via the Gmail connector to `licausedavid@gmail.com` — no reformatting or rewriting.
+7. **Send the email.** Determine the recipient first: if this run's prompt embeds a recipient email (the scheduled routine's prompt does — see `reference/create-routine.md` in the `setup-events-daily` skill), use that address. Otherwise (a manual/local run), read `DIGEST_RECIPIENT_EMAIL` from `.env`. Never fall back to a hardcoded address, and never send anywhere else — this is the project's core safety guarantee (`dev/PRD.md`). Read `digest_output.json` and send its `subject`/`body` **verbatim** via the Gmail connector to that address — no reformatting or rewriting.
 
 8. **Log the run to `EventLog`.** Write one row per event (from `events.json`) to the `EventLog` table via the Airtable connector: same fields, but set `Sent: true` and assign `DigestIndex` as each event's 1-based position in the digest. Leave `AddedToCalendar`/`CalendarEventId` blank — nothing populates them, since adding an event to the calendar happens directly in the user's browser when they click a quick-add link, with no routine involvement.
 
-9. **Report a final summary** to the user: number of sources checked, number of events found, and any sources where the step-4 fallback was used (so their `Sources` table URL may need updating).
+9. **Prune old `EventLog` rows.** Read all `EventLog` rows via the Airtable connector and delete any whose `Date` is more than 7 days before today's date (from step 1) — this keeps `EventLog` a rolling ~7-day window (see `dev/PRD.md` §6.2). This is routine maintenance, not event dedup, and must not block the digest: if it fails, note that in the final summary rather than retrying or aborting the run.
+
+10. **Report a final summary** to the user: number of sources checked, number of events found, any sources where the step-4 fallback was used (so their `Sources` table URL may need updating), and how many old `EventLog` rows were pruned in step 9.
