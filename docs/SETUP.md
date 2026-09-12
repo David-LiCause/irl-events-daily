@@ -3,12 +3,12 @@
 Minimal checklist to stand up the architecture for the first end-to-end test. Expand with full details once the pipeline is validated.
 
 ## Connectors (claude.ai/customize/connectors)
-- [ ] Twilio — connect.
 - [ ] Airtable — connect, select the dedicated base.
-- [ ] Google Calendar — already connected; confirm/select the "Events" calendar specifically if a calendar-scoping step is offered (this is one of the open assumptions being tested).
+- [ ] Gmail — connect (or reconnect) with **send** scope. The routine needs this to email the digest — a previous, more conservative design kept Gmail read-only-only; that's been revised since the routine only ever sends to the user's own address (see `dev/PRD.md` §6.4).
+- [ ] Google Calendar connector is **not needed** for this routine — the calendar write happens client-side (the user clicks a quick-add link in their own browser), not via any connector.
 
 ## Google Calendar
-- [ ] Create a calendar named "Events" if it doesn't already exist.
+- [ ] Create a calendar named "Events" if it doesn't already exist — this is what the user selects from the calendar dropdown when saving an event via a quick-add link.
 
 ## Airtable base
 - [ ] Copy `.env.example` to `.env` and fill in `AIRTABLE_PAT` (create at airtable.com/create/tokens with `data.records:read`, `data.records:write`, `schema.bases:write` scopes) and `AIRTABLE_WORKSPACE_ID`.
@@ -19,19 +19,12 @@ Minimal checklist to stand up the architecture for the first end-to-end test. Ex
 - [ ] Grant Claude's GitHub App access to your copy of this repo: github.com/settings/installations → find the Claude/Claude Code app → Configure → add this repo (or your fork) to its repository access list. Without this, routine creation fails with a 403 permission error.
 - [ ] This is tied to your own GitHub account, not the repo itself — if this repo is public and someone else clones/forks it, they must do this same step for their own copy under their own account.
 
-## Routine A — scrape-events-digest
+## Routine — scrape-events-digest
 - [ ] Create via the `schedule` skill / RemoteTrigger.
 - [ ] Cron trigger (daily).
 - [ ] Environment: `full-network-access`.
 - [ ] `sources`: this repo.
-- [ ] `mcp_connections`: Twilio, Airtable.
-- [ ] Prompt: `/scrape-events-digest`.
+- [ ] `mcp_connections`: Airtable, Gmail.
+- [ ] Prompt: `Read the file .claude/skills/scrape-events-digest/SKILL.md in this repo and carry out the instructions in it exactly.` (skill slash-commands don't work in routine sessions — see `dev/TECHNICAL_DESIGN.md` Findings.)
 
-## Routine B — add-event-to-calendar
-- [ ] Needs an API-triggerable routine — confirm this trigger type exists in the claude.ai/code/routines UI (not exposed by the `RemoteTrigger` tool, which only supports cron/run_once_at).
-- [ ] `mcp_connections`: Google Calendar, Airtable.
-- [ ] Prompt template: `/add-event-to-calendar <reply text>`.
-
-## Twilio Studio (deferred until Routine B is confirmed working standalone)
-- [ ] Buy/confirm a phone number.
-- [ ] Build Studio Flow: Trigger widget (incoming SMS) → HTTP Request widget → Routine B's API-trigger endpoint.
+No second routine, no reply bridge, no SMS provider of any kind is needed in this design — the calendar write happens directly in the user's browser when they click a quick-add link in the email.
