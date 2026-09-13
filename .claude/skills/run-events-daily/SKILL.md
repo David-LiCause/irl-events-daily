@@ -7,7 +7,11 @@ description: Fetches today's events from every configured source, emails the use
 
 1. **Determine today's date.** Resolve the current date in **America/New_York** (not UTC — the cloud environment clock is UTC): run `TZ=America/New_York date +%Y-%m-%d` via Bash. Use this single value for the rest of the run to decide "is this event today."
 
-2. **Pull sources from Airtable.** Read **every** row of the `Sources` table via the Airtable connector. For each row, capture `Name` and `URL`.
+2. **Pull sources from Airtable.**
+   - If you don't already have the `events-daily` base's ID this session, call the Airtable MCP `search_bases` to find it, then `list_tables_for_base(baseId)` to get the `Sources` table's `tableId`.
+   - Call `list_records_for_table(baseId, tableId, fields: ["Name", "URL"])` to read rows.
+   - This call is paginated — if the response includes a `next_cursor`/offset, keep calling with that cursor until none remains, so **every** row is read, not just the first page.
+   - For each record returned, capture `Name` and `URL` from its `fields`.
 
 3. **Iterate sources and extract today's events.** For each `Name`/`URL` pair:
    - Fetch the URL.
@@ -51,7 +55,18 @@ description: Fetches today's events from every configured source, emails the use
    ```
    This validates `events.json`, builds a Google Calendar quick-add URL for each event, and renders the email into `digest_output.json` (`{"subject": ..., "body": ...}`). If it exits non-zero, fix the offending event data in `events.json` and rerun — do not proceed to send with unvalidated data.
 
-7. **Send the email.** Determine the recipient first: if this run's prompt embeds a recipient email (the scheduled routine's prompt does — see `reference/create-routine.md` in the `setup-events-daily` skill), use that address. Otherwise (a manual/local run), read `DIGEST_RECIPIENT_EMAIL` from `.env`. Never fall back to a hardcoded address, and never send anywhere else — this is the project's core safety guarantee (`dev/PRD.md`). Read `digest_output.json` and send its `subject`/`body` **verbatim** via the Gmail connector to that address — no reformatting or rewriting.
+7. **Send the email.**
+   - Determine the recipient first: if this run's prompt embeds a recipient email (the scheduled routine's prompt does — see `reference/create-routine.md` in the `setup-events-daily` skill), use that address. Otherwise (a manual/local run), read `DIGEST_RECIPIENT_EMAIL` from `.env`. Never fall back to a hardcoded address, and never send anywhere else — this is the project's core safety guarantee (`dev/PRD.md`).
+   - Read `digest_output.json` for `subject`/`body`.
+   - Call the Gmail MCP `send_message` tool with exactly these parameters:
+     ```json
+     {
+       "to": ["<recipient address from above>"],
+       "subject": "<subject from digest_output.json, verbatim>",
+       "body": "<body from digest_output.json, verbatim>"
+     }
+     ```
+   - Do not set `cc`, `bcc`, `htmlBody`, `draftId`, or any other parameter. Do not reformat or rewrite `subject`/`body` — send them exactly as written.
 
 8. **Log the run to `EventLog`.** Write one row per event (from `events.json`) to the `EventLog` table via the Airtable connector: same fields, but set `Sent: true` and assign `DigestIndex` as each event's 1-based position in the digest. Leave `AddedToCalendar`/`CalendarEventId` blank — nothing populates them, since adding an event to the calendar happens directly in the user's browser when they click a quick-add link, with no routine involvement.
 
