@@ -105,10 +105,15 @@ def main():
         build_digest.validate(events)
         build_digest.validate_sources(sources)
         subject, body = build_digest.render_email(events, sources)
+        html_body = build_digest.render_email_html(events, sources)
 
-        out_path = OUTPUT_DIR / f"{name}.txt"
-        out_path.write_text(f"Subject: {subject}\n\n{body}\n")
-        print(f"Wrote {out_path.relative_to(REPO_ROOT)}")
+        txt_path = OUTPUT_DIR / f"{name}.txt"
+        txt_path.write_text(f"Subject: {subject}\n\n{body}\n")
+        print(f"Wrote {txt_path.relative_to(REPO_ROOT)}")
+
+        html_path = OUTPUT_DIR / f"{name}.html"
+        html_path.write_text(html_body)
+        print(f"Wrote {html_path.relative_to(REPO_ROOT)} (open in a browser to preview)")
 
 
 if __name__ == "__main__":

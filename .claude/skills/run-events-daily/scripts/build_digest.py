@@ -6,15 +6,28 @@ Usage: python3 build_digest.py events.json sources_report.json digest_output.jso
 Reads a flat JSON array of events and a flat JSON array of source statuses
 (see .claude/skills/run-events-daily/SKILL.md step 5 for both schemas),
 builds a Google Calendar "quick add" URL for each event, and writes
-{"subject": ..., "body": ...} to the output path.
+{"subject": ..., "body": ..., "htmlBody": ...} to the output path.
 """
+import html
 import json
 import sys
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
+FONT_STACK = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
+COLOR_BG = "#f4f4f7"
+COLOR_CARD = "#ffffff"
+COLOR_BORDER = "#e5e7eb"
+COLOR_TEXT = "#1f2937"
+COLOR_MUTED = "#6b7280"
+COLOR_ACCENT = "#2563eb"
+COLOR_WARN_BG = "#fffbeb"
+COLOR_WARN_BORDER = "#fde68a"
+COLOR_WARN_TEXT = "#92400e"
+
 REQUIRED_FIELDS = ["EventTitle", "Location", "SourceName", "SourceURL", "StartDateTime", "AllDay"]
 SOURCE_STATUSES = ("ok", "blocked")
+SUBJECT = "[Claude Code Routine] Today's Events"
 
 DATETIME_FMT = "%Y-%m-%dT%H:%M:%S"
 DATE_FMT = "%Y-%m-%d"
@@ -80,10 +93,13 @@ def validate_sources(sources):
 
 
 def build_quick_add_url(event):
-    details = event.get("EventDescription") or ""
-    link = event.get("SignupURL") or event.get("SourceURL")
-    if link:
-        details = f"{details}\n\n{link}" if details else link
+    detail_parts = []
+    if event.get("EventDescription"):
+        detail_parts.append(event["EventDescription"])
+    if event.get("SignupURL"):
+        detail_parts.append(f"Sign up: {event['SignupURL']}")
+    detail_parts.append(f"Source: {event['SourceURL']}")
+    details = "\n\n".join(detail_parts)
 
     if event["AllDay"]:
         start = datetime.strptime(event["StartDateTime"][:10], DATE_FMT)
@@ -112,20 +128,23 @@ def build_quick_add_url(event):
 
 
 def render_email(events, sources):
-    date = events[0].get("Date", "") if events else ""
-    subject = f"Events Daily: {date} — {len(events)} event(s) found"
+    subject = SUBJECT
 
     blocks = []
     for event in events:
-        lines = [event["EventTitle"]]
+        lines = [event["EventTitle"], event["SourceName"]]
         if event.get("EventTime"):
             lines.append(event["EventTime"])
         lines.append(event["Location"])
         if event.get("Price"):
             lines.append(f"Price: {event['Price']}")
-        lines.append(f"Add to calendar: {build_quick_add_url(event)}")
         if event.get("SignupURL"):
-            lines.append(f"Signup: {event['SignupURL']}")
+            lines.append(f"Sign up required: Yes ({event['SignupURL']})")
+        else:
+            lines.append("Sign up required: No")
+        if event.get("EventDescription"):
+            lines.append(event["EventDescription"])
+        lines.append(f"Add to calendar: {build_quick_add_url(event)}")
         lines.append(f"Source: {event['SourceURL']}")
         blocks.append("\n".join(lines))
 
@@ -148,6 +167,119 @@ def render_email(events, sources):
     return subject, body
 
 
+def esc(value):
+    return html.escape(str(value)) if value else ""
+
+
+def render_event_card_html(event):
+    detail_lines = []
+    if event.get("EventTime"):
+        detail_lines.append(esc(event["EventTime"]))
+    detail_lines.append(esc(event["Location"]))
+    if event.get("Price"):
+        detail_lines.append(f"Price: {esc(event['Price'])}")
+
+    if event.get("SignupURL"):
+        detail_lines.append("Sign up required: Yes")
+    else:
+        detail_lines.append("Sign up required: No")
+
+    details_html = "<br>".join(detail_lines)
+
+    description_html = ""
+    if event.get("EventDescription"):
+        description_html = (
+            f'<div style="font-size:14px;color:{COLOR_TEXT};line-height:1.5;margin-bottom:16px;">'
+            f'{esc(event["EventDescription"])}</div>'
+        )
+
+    buttons_html = ""
+    if event.get("SignupURL"):
+        buttons_html += (
+            f'<a href="{esc(event["SignupURL"])}" style="display:inline-block;background-color:{COLOR_CARD};'
+            f'color:{COLOR_ACCENT};text-decoration:none;padding:9px 18px;border-radius:6px;font-size:14px;'
+            f'font-weight:600;border:1px solid {COLOR_ACCENT};margin-right:8px;">Sign Up</a>'
+        )
+    buttons_html += (
+        f'<a href="{esc(build_quick_add_url(event))}" style="display:inline-block;background-color:{COLOR_ACCENT};'
+        f'color:#ffffff;text-decoration:none;padding:10px 18px;border-radius:6px;font-size:14px;font-weight:600;">'
+        f'Add to Calendar</a>'
+    )
+
+    return f'''
+<div style="background-color:{COLOR_CARD};border:1px solid {COLOR_BORDER};border-radius:8px;padding:20px;margin-bottom:16px;">
+  <div style="font-size:17px;font-weight:600;color:{COLOR_TEXT};margin-bottom:2px;">{esc(event["EventTitle"])}</div>
+  <div style="font-size:13px;color:{COLOR_MUTED};margin-bottom:12px;">{esc(event["SourceName"])}</div>
+  <div style="font-size:14px;color:{COLOR_MUTED};line-height:1.5;margin-bottom:12px;">{details_html}</div>
+  {description_html}
+  <div>{buttons_html}</div>
+  <div style="font-size:13px;color:{COLOR_MUTED};margin-top:12px;"><a href="{esc(event["SourceURL"])}" style="color:{COLOR_ACCENT};">Source</a></div>
+</div>'''
+
+
+def render_email_html(events, sources):
+    date = events[0].get("Date", "") if events else ""
+    subject = SUBJECT
+
+    if events:
+        events_html = "\n".join(render_event_card_html(e) for e in events)
+    else:
+        events_html = (
+            f'<div style="background-color:{COLOR_CARD};border:1px solid {COLOR_BORDER};'
+            f'border-radius:8px;padding:20px;color:{COLOR_MUTED};font-size:14px;">'
+            f"No events found for today.</div>"
+        )
+
+    blocked = [s for s in sources if s["Status"] == "blocked"]
+    blocked_html = ""
+    if blocked:
+        items = "\n".join(
+            f'<li style="margin-bottom:4px;"><a href="{esc(s["URL"])}" style="color:{COLOR_WARN_TEXT};">{esc(s["Name"])}</a> — {esc(s["Reason"])}</li>'
+            for s in blocked
+        )
+        blocked_html = f'''
+<div style="background-color:{COLOR_WARN_BG};border:1px solid {COLOR_WARN_BORDER};border-radius:8px;padding:16px 16px 16px 20px;margin-bottom:16px;">
+  <div style="font-size:14px;font-weight:600;color:{COLOR_WARN_TEXT};margin-bottom:8px;">Could not check automatically — please visit these manually:</div>
+  <ul style="margin:0;padding-left:16px;color:{COLOR_WARN_TEXT};font-size:13px;">{items}</ul>
+</div>'''
+
+    summary_items = "<br>".join(
+        f'{"OK" if s["Status"] == "ok" else "BLOCKED"} — {esc(s["Name"])}: <a href="{esc(s["URL"])}" style="color:{COLOR_MUTED};">{esc(s["URL"])}</a>'
+        for s in sources
+    )
+    summary_html = f'''
+<div style="font-size:12px;color:{COLOR_MUTED};padding-top:16px;border-top:1px solid {COLOR_BORDER};line-height:1.6;">
+  <div style="margin-bottom:6px;">Sources checked today ({len(sources)}):</div>
+  {summary_items}
+</div>'''
+
+    return f'''<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{esc(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background-color:{COLOR_BG};font-family:{FONT_STACK};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:{COLOR_BG};padding:24px 0;">
+<tr><td align="center">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:{COLOR_CARD};border-radius:8px;">
+<tr><td style="padding:24px 24px 8px 24px;">
+  <div style="font-size:20px;font-weight:700;color:{COLOR_TEXT};">Events Daily</div>
+  <div style="font-size:14px;color:{COLOR_MUTED};margin-top:4px;">{esc(date)} &mdash; {len(events)} event(s) found</div>
+</td></tr>
+<tr><td style="padding:16px 24px 24px 24px;">
+{events_html}
+{blocked_html}
+{summary_html}
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>'''
+
+
 def main():
     if len(sys.argv) != 4:
         print("Usage: python3 build_digest.py events.json sources_report.json digest_output.json", file=sys.stderr)
@@ -163,9 +295,10 @@ def main():
     validate(events)
     validate_sources(sources)
     subject, body = render_email(events, sources)
+    html_body = render_email_html(events, sources)
 
     with open(output_path, "w") as f:
-        json.dump({"subject": subject, "body": body}, f, indent=2)
+        json.dump({"subject": subject, "body": body, "htmlBody": html_body}, f, indent=2)
 
     print(f"Wrote digest for {len(events)} event(s), {len(sources)} source(s) to {output_path}")
 

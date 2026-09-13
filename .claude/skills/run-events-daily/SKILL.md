@@ -15,7 +15,7 @@ description: Fetches today's events from every configured source, emails the use
 
 3. **Iterate sources and extract today's events.** For each `Name`/`URL` pair:
    - Fetch the URL.
-   - Extract any events listed on the page (title, date/time, location, signup/details link).
+   - Extract any events listed on the page: title, date/time, location, signup/details link, and a short description (a sentence or two about the event, if the page provides one — e.g. an event blurb or summary). The description must come from the page itself — leave it empty if the page doesn't have one, never invent or paraphrase one from just the title.
    - Filter to only events matching today's date from step 1 — discard everything else.
    - Attach the source `Name`/`URL` to each surviving event as `SourceName`/`SourceURL`.
    - Record this source's outcome for step 5's `sources_report.json`: `"ok"` if the page fetched and parsed cleanly (even if it simply had zero events today), or pending-retry if the fetch/parse failed (a 403, error, redirect, unparseable layout, or implausibly-zero results) — resolve pending ones in step 4.
@@ -49,6 +49,7 @@ description: Fetches today's events from every configured source, emails the use
      }
    ]
    ```
+   - `EventDescription` is the short description captured in step 3 — `""` if the page didn't have one. It's shown in the email for every event, so don't fabricate one just to fill it.
    - `StartDateTime`/`EndDateTime` are local **America/New_York** time, no offset. `EventTime` stays a human-readable string for display in Airtable.
    - `EndDateTime: null` means "unknown" — `build_digest.py` defaults to a 2-hour duration.
    - `AllDay: true` events omit time-of-day.
@@ -69,20 +70,21 @@ description: Fetches today's events from every configured source, emails the use
    ```
    python3 .claude/skills/run-events-daily/scripts/build_digest.py events.json sources_report.json digest_output.json
    ```
-   This validates both input files, builds a Google Calendar quick-add URL for each event, and renders the email into `digest_output.json` (`{"subject": ..., "body": ...}`) — the body ends with a "needs a manual look" section listing any `"blocked"` sources (asking the user to visit those URLs directly, since they couldn't be checked automatically), followed by a "sources checked" summary of every source. If it exits non-zero, fix the offending data and rerun — do not proceed to send with unvalidated data.
+   This validates both input files, builds a Google Calendar quick-add URL for each event, and renders the email into `digest_output.json` (`{"subject": ..., "body": ..., "htmlBody": ...}`) — `body` is the plain-text version, `htmlBody` a styled HTML version (an "Add to Calendar" button per event, plus the same "needs a manual look" and "sources checked" sections). Both end with a "needs a manual look" section listing any `"blocked"` sources (asking the user to visit those URLs directly, since they couldn't be checked automatically), followed by a "sources checked" summary of every source. If it exits non-zero, fix the offending data and rerun — do not proceed to send with unvalidated data.
 
 7. **Send the email.**
    - Determine the recipient first: if this run's prompt embeds a recipient email (the scheduled routine's prompt does — see `reference/create-routine.md` in the `setup-events-daily` skill), use that address. Otherwise (a manual/local run), read `DIGEST_RECIPIENT_EMAIL` from `.env`. Never fall back to a hardcoded address, and never send anywhere else — this is the project's core safety guarantee (`dev/PRD.md`).
-   - Read `digest_output.json` for `subject`/`body`.
+   - Read `digest_output.json` for `subject`/`body`/`htmlBody`.
    - Call the Gmail MCP `send_message` tool with exactly these parameters:
      ```json
      {
        "to": ["<recipient address from above>"],
        "subject": "<subject from digest_output.json, verbatim>",
-       "body": "<body from digest_output.json, verbatim>"
+       "body": "<body from digest_output.json, verbatim>",
+       "htmlBody": "<htmlBody from digest_output.json, verbatim>"
      }
      ```
-   - Do not set `cc`, `bcc`, `htmlBody`, `draftId`, or any other parameter. Do not reformat or rewrite `subject`/`body` — send them exactly as written.
+   - Do not set `cc`, `bcc`, `draftId`, or any other parameter. Do not reformat or rewrite `subject`/`body`/`htmlBody` — send them exactly as written.
 
 8. **Log the run to `EventLog`.** Write one row per event (from `events.json`) to the `EventLog` table via the Airtable connector: same fields, but set `Sent: true` and assign `DigestIndex` as each event's 1-based position in the digest. Leave `AddedToCalendar`/`CalendarEventId` blank — nothing populates them, since adding an event to the calendar happens directly in the user's browser when they click a quick-add link, with no routine involvement.
 
