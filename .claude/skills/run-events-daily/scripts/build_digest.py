@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Validates extracted events and renders the daily digest email.
+"""Validates extracted events/sources and renders the daily digest email.
 
-Usage: python3 build_digest.py events.json digest_output.json
+Usage: python3 build_digest.py events.json sources_report.json digest_output.json
 
-Reads a flat JSON array of events (see .claude/skills/run-events-daily/SKILL.md
-step 5 for the schema), builds a Google Calendar "quick add" URL for each
-event, and writes {"subject": ..., "body": ...} to the output path.
+Reads a flat JSON array of events and a flat JSON array of source statuses
+(see .claude/skills/run-events-daily/SKILL.md step 5 for both schemas),
+builds a Google Calendar "quick add" URL for each event, and writes
+{"subject": ..., "body": ...} to the output path.
 """
 import json
 import sys
@@ -13,6 +14,7 @@ from datetime import datetime, timedelta
 from urllib.parse import quote
 
 REQUIRED_FIELDS = ["EventTitle", "Location", "SourceName", "SourceURL", "StartDateTime", "AllDay"]
+SOURCE_STATUSES = ("ok", "blocked")
 
 DATETIME_FMT = "%Y-%m-%dT%H:%M:%S"
 DATE_FMT = "%Y-%m-%d"
@@ -61,6 +63,22 @@ def validate(events):
                 parse_datetime(event["EndDateTime"], i, title, "EndDateTime")
 
 
+def validate_sources(sources):
+    for i, source in enumerate(sources):
+        name = source.get("Name")
+        label = name or f"source at index {i}"
+        for field in ("Name", "URL", "Status"):
+            if source.get(field) in (None, ""):
+                print(f"Invalid source ({label}): missing required field '{field}'", file=sys.stderr)
+                sys.exit(1)
+        if source["Status"] not in SOURCE_STATUSES:
+            print(f"Invalid source ({label}): 'Status' must be one of {SOURCE_STATUSES}, got {source['Status']!r}", file=sys.stderr)
+            sys.exit(1)
+        if source["Status"] == "blocked" and not source.get("Reason"):
+            print(f"Invalid source ({label}): 'blocked' sources require a 'Reason'", file=sys.stderr)
+            sys.exit(1)
+
+
 def build_quick_add_url(event):
     details = event.get("EventDescription") or ""
     link = event.get("SignupURL") or event.get("SourceURL")
@@ -93,7 +111,7 @@ def build_quick_add_url(event):
     return f"https://www.google.com/calendar/render?{params}"
 
 
-def render_email(events):
+def render_email(events, sources):
     date = events[0].get("Date", "") if events else ""
     subject = f"Events Daily: {date} — {len(events)} event(s) found"
 
@@ -111,27 +129,45 @@ def render_email(events):
         lines.append(f"Source: {event['SourceURL']}")
         blocks.append("\n".join(lines))
 
-    body = "\n\n---\n\n".join(blocks) if blocks else "No events found for today."
+    sections = ["\n\n---\n\n".join(blocks) if blocks else "No events found for today."]
+
+    blocked = [s for s in sources if s["Status"] == "blocked"]
+    if blocked:
+        lines = ["Could not check automatically — please visit these manually:"]
+        for s in blocked:
+            lines.append(f"- {s['Name']}: {s['URL']} ({s['Reason']})")
+        sections.append("\n".join(lines))
+
+    summary_lines = [f"Sources checked today ({len(sources)}):"]
+    for s in sources:
+        mark = "OK" if s["Status"] == "ok" else "BLOCKED"
+        summary_lines.append(f"[{mark}] {s['Name']}: {s['URL']}")
+    sections.append("\n".join(summary_lines))
+
+    body = "\n\n===\n\n".join(sections)
     return subject, body
 
 
 def main():
-    if len(sys.argv) != 3:
-        print("Usage: python3 build_digest.py events.json digest_output.json", file=sys.stderr)
+    if len(sys.argv) != 4:
+        print("Usage: python3 build_digest.py events.json sources_report.json digest_output.json", file=sys.stderr)
         sys.exit(1)
 
-    events_path, output_path = sys.argv[1], sys.argv[2]
+    events_path, sources_path, output_path = sys.argv[1], sys.argv[2], sys.argv[3]
 
     with open(events_path) as f:
         events = json.load(f)
+    with open(sources_path) as f:
+        sources = json.load(f)
 
     validate(events)
-    subject, body = render_email(events)
+    validate_sources(sources)
+    subject, body = render_email(events, sources)
 
     with open(output_path, "w") as f:
         json.dump({"subject": subject, "body": body}, f, indent=2)
 
-    print(f"Wrote digest for {len(events)} event(s) to {output_path}")
+    print(f"Wrote digest for {len(events)} event(s), {len(sources)} source(s) to {output_path}")
 
 
 if __name__ == "__main__":
