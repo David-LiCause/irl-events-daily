@@ -4,7 +4,7 @@
 Usage: python3 build_digest.py events.json sources_report.json digest_output.json today
 
 Reads a flat JSON array of events and a flat JSON array of source statuses
-(see .claude/skills/run-events-daily/SKILL.md step 5 for both schemas),
+(see .claude/skills/run-irl-events-daily/SKILL.md step 5 for both schemas),
 splits events into "today" (Date == today) and "this week" (later dates,
 grouped by day), builds a Google Calendar "quick add" URL for each event,
 and writes {"subject": ..., "body": ..., "htmlBody": ...} to the output path.

@@ -16,6 +16,6 @@
 ## Caveat: `.env` doesn't reach the scheduled routine
 Because `.env` is gitignored, it's never pushed to the remote — the routine's cloud checkout (cloned fresh from the repo on each run) won't have it. `.env` is authoritative for:
 - `AIRTABLE_PAT`/`AIRTABLE_WORKSPACE_ID`, used only by the local `make setup-airtable` script (run once, locally, during setup — never inside the routine).
-- `DIGEST_RECIPIENT_EMAIL`, used for manual/local test runs of `run-events-daily`.
+- `DIGEST_RECIPIENT_EMAIL`, used for manual/local test runs of `run-irl-events-daily`.
 
 For the actual scheduled routine, `DIGEST_RECIPIENT_EMAIL`'s value must instead be read out of `.env` here during setup and embedded as a literal in the routine's creation prompt — see `reference/create-routine.md`.

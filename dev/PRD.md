@@ -1,4 +1,4 @@
-# events-daily
+# irl-events-daily
 
 ## 1. Problem Statement
 Event pages for organizations/venues the user follows have no easy calendar export. Keeping up with what's happening requires manually checking many different sites. There's no single feed to subscribe to.

@@ -10,7 +10,7 @@ import importlib.util
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-BUILD_DIGEST_PATH = REPO_ROOT / ".claude/skills/run-events-daily/scripts/build_digest.py"
+BUILD_DIGEST_PATH = REPO_ROOT / ".claude/skills/run-irl-events-daily/scripts/build_digest.py"
 OUTPUT_DIR = REPO_ROOT / "dev" / "email_previews"
 
 TODAY = "2026-09-12"
