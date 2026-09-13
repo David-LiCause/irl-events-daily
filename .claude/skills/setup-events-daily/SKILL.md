@@ -8,7 +8,7 @@ description: One-time setup for the events-daily project — connects Airtable a
 1. Set up `.env` (Airtable PAT/workspace ID, and the user's own digest recipient email) — follow `reference/env-setup.md`.
 2. Check Airtable connector access (call the Airtable MCP `list_bases`). If it fails or no base is accessible, this step requires the user — you cannot connect it yourself. Print the manual instructions in `reference/airtable-connector-setup.md` to the user verbatim and wait for them to confirm before re-checking and continuing.
 3. Check Gmail connector access (call the Gmail MCP `list_labels`). If it fails or no access, this step requires the user — you cannot connect it yourself. Print the manual instructions in `reference/gmail-connector-setup.md` to the user verbatim and wait for them to confirm before re-checking and continuing.
-4. Check whether the `events-daily` Airtable base already has `Sources`/`EventLog` tables (list bases/tables via the Airtable connector). If not, run `make setup-airtable` — read the idempotency caveat in `reference/airtable-connector-setup.md` first.
+4. Check whether the `events-daily` Airtable base already has a `Sources` table (list bases/tables via the Airtable connector). If not, run `make setup-airtable` — read the idempotency caveat in `reference/airtable-connector-setup.md` first.
 5. Populate the `Sources` table — follow `reference/populate-sources-table.md`.
 6. Create the Claude Code routine — follow `reference/create-routine.md`.
 7. Report a final summary to the user: connectors confirmed, tables created/found, source row count, digest recipient email, routine ID/link.

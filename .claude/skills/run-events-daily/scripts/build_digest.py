@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Validates extracted events/sources and renders the daily digest email.
 
-Usage: python3 build_digest.py events.json sources_report.json digest_output.json
+Usage: python3 build_digest.py events.json sources_report.json digest_output.json today
 
 Reads a flat JSON array of events and a flat JSON array of source statuses
 (see .claude/skills/run-events-daily/SKILL.md step 5 for both schemas),
-builds a Google Calendar "quick add" URL for each event, and writes
-{"subject": ..., "body": ..., "htmlBody": ...} to the output path.
+splits events into "today" (Date == today) and "this week" (later dates,
+grouped by day), builds a Google Calendar "quick add" URL for each event,
+and writes {"subject": ..., "body": ..., "htmlBody": ...} to the output path.
 """
 import html
+import itertools
 import json
 import sys
 from datetime import datetime, timedelta
@@ -27,7 +29,6 @@ COLOR_WARN_TEXT = "#92400e"
 
 REQUIRED_FIELDS = ["EventTitle", "Location", "SourceName", "SourceURL", "StartDateTime", "AllDay"]
 SOURCE_STATUSES = ("ok", "blocked")
-SUBJECT = "[Claude Code Routine] Today's Events"
 
 DATETIME_FMT = "%Y-%m-%dT%H:%M:%S"
 DATE_FMT = "%Y-%m-%d"
@@ -127,28 +128,60 @@ def build_quick_add_url(event):
     return f"https://www.google.com/calendar/render?{params}"
 
 
-def render_email(events, sources):
-    subject = SUBJECT
+def partition_events(events, today):
+    """Splits events into today's list and (date, events) groups for the rest of the week."""
+    today_events = sorted((e for e in events if e["Date"] == today), key=lambda e: e["StartDateTime"])
+    upcoming = sorted((e for e in events if e["Date"] != today), key=lambda e: e["StartDateTime"])
+    upcoming_groups = [(date, list(group)) for date, group in itertools.groupby(upcoming, key=lambda e: e["Date"])]
+    return today_events, upcoming_groups
 
-    blocks = []
-    for event in events:
-        lines = [event["EventTitle"], event["SourceName"]]
-        if event.get("EventTime"):
-            lines.append(event["EventTime"])
-        lines.append(event["Location"])
-        if event.get("Price"):
-            lines.append(f"Price: {event['Price']}")
-        if event.get("SignupURL"):
-            lines.append(f"Sign up required: Yes ({event['SignupURL']})")
-        else:
-            lines.append("Sign up required: No")
-        if event.get("EventDescription"):
-            lines.append(event["EventDescription"])
-        lines.append(f"Add to calendar: {build_quick_add_url(event)}")
-        lines.append(f"Source: {event['SourceURL']}")
-        blocks.append("\n".join(lines))
 
-    sections = ["\n\n---\n\n".join(blocks) if blocks else "No events found for today."]
+def format_date_header(date_str):
+    return datetime.strptime(date_str, DATE_FMT).strftime("%A, %b %d")
+
+
+def build_subject(today_count, upcoming_count):
+    return f"[Claude Code Routine] Today's Events — {today_count} today, {upcoming_count} this week"
+
+
+def render_event_block_text(event):
+    lines = [event["EventTitle"], event["SourceName"]]
+    if event.get("EventTime"):
+        lines.append(event["EventTime"])
+    lines.append(event["Location"])
+    if event.get("Price"):
+        lines.append(f"Price: {event['Price']}")
+    if event.get("SignupURL"):
+        lines.append(f"Sign up required: Yes ({event['SignupURL']})")
+    else:
+        lines.append("Sign up required: No")
+    if event.get("EventDescription"):
+        lines.append(event["EventDescription"])
+    lines.append(f"Add to calendar: {build_quick_add_url(event)}")
+    lines.append(f"Source: {event['SourceURL']}")
+    return "\n".join(lines)
+
+
+def render_email(events, sources, today):
+    today_events, upcoming_groups = partition_events(events, today)
+    upcoming_count = sum(len(group) for _, group in upcoming_groups)
+    subject = build_subject(len(today_events), upcoming_count)
+
+    today_body = (
+        "\n\n---\n\n".join(render_event_block_text(e) for e in today_events)
+        if today_events else "No events found for today."
+    )
+    sections = [f"TODAY\n\n{today_body}"]
+
+    if upcoming_groups:
+        day_blocks = []
+        for date, group in upcoming_groups:
+            day_body = "\n\n---\n\n".join(render_event_block_text(e) for e in group)
+            day_blocks.append(f"{format_date_header(date)}\n\n{day_body}")
+        upcoming_body = "\n\n---\n\n".join(day_blocks)
+    else:
+        upcoming_body = "No events found for the rest of the week."
+    sections.append(f"COMING UP THIS WEEK\n\n{upcoming_body}")
 
     blocked = [s for s in sources if s["Status"] == "blocked"]
     if blocked:
@@ -217,18 +250,50 @@ def render_event_card_html(event):
 </div>'''
 
 
-def render_email_html(events, sources):
-    date = events[0].get("Date", "") if events else ""
-    subject = SUBJECT
+def render_empty_card_html(message):
+    return (
+        f'<div style="background-color:{COLOR_CARD};border:1px solid {COLOR_BORDER};'
+        f'border-radius:8px;padding:20px;color:{COLOR_MUTED};font-size:14px;">'
+        f"{esc(message)}</div>"
+    )
 
-    if events:
-        events_html = "\n".join(render_event_card_html(e) for e in events)
-    else:
-        events_html = (
-            f'<div style="background-color:{COLOR_CARD};border:1px solid {COLOR_BORDER};'
-            f'border-radius:8px;padding:20px;color:{COLOR_MUTED};font-size:14px;">'
-            f"No events found for today.</div>"
+
+def render_section_header_html(label, large=False):
+    font_size = "20px" if large else "15px"
+    return f'<div style="font-size:{font_size};font-weight:700;color:{COLOR_TEXT};margin:0 0 12px 0;">{esc(label)}</div>'
+
+
+def render_date_subheader_html(date_str):
+    return (
+        f'<div style="font-size:16px;font-weight:600;color:{COLOR_MUTED};margin:16px 0 8px 0;'
+        f'padding-top:8px;border-top:1px solid {COLOR_BORDER};">{esc(format_date_header(date_str))}</div>'
+    )
+
+
+def render_email_html(events, sources, today):
+    today_events, upcoming_groups = partition_events(events, today)
+    upcoming_count = sum(len(group) for _, group in upcoming_groups)
+    subject = build_subject(len(today_events), upcoming_count)
+
+    today_html = (
+        "\n".join(render_event_card_html(e) for e in today_events)
+        if today_events else render_empty_card_html("No events found for today.")
+    )
+
+    if upcoming_groups:
+        upcoming_html = "\n".join(
+            render_date_subheader_html(date) + "\n" + "\n".join(render_event_card_html(e) for e in group)
+            for date, group in upcoming_groups
         )
+    else:
+        upcoming_html = render_empty_card_html("No events found for the rest of the week.")
+
+    events_html = f'''
+{today_html}
+<div style="margin-top:24px;">
+{render_section_header_html("Coming up this week", large=True)}
+{upcoming_html}
+</div>'''
 
     blocked = [s for s in sources if s["Status"] == "blocked"]
     blocked_html = ""
@@ -265,8 +330,8 @@ def render_email_html(events, sources):
 <tr><td align="center">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:{COLOR_CARD};border-radius:8px;">
 <tr><td style="padding:24px 24px 8px 24px;">
-  <div style="font-size:20px;font-weight:700;color:{COLOR_TEXT};">Events Daily</div>
-  <div style="font-size:14px;color:{COLOR_MUTED};margin-top:4px;">{esc(date)} &mdash; {len(events)} event(s) found</div>
+  <div style="font-size:20px;font-weight:700;color:{COLOR_TEXT};">Today's Events</div>
+  <div style="font-size:14px;color:{COLOR_MUTED};margin-top:4px;">{esc(today)} &mdash; {len(today_events)} today &middot; {upcoming_count} this week</div>
 </td></tr>
 <tr><td style="padding:16px 24px 24px 24px;">
 {events_html}
@@ -281,11 +346,16 @@ def render_email_html(events, sources):
 
 
 def main():
-    if len(sys.argv) != 4:
-        print("Usage: python3 build_digest.py events.json sources_report.json digest_output.json", file=sys.stderr)
+    if len(sys.argv) != 5:
+        print("Usage: python3 build_digest.py events.json sources_report.json digest_output.json today", file=sys.stderr)
         sys.exit(1)
 
-    events_path, sources_path, output_path = sys.argv[1], sys.argv[2], sys.argv[3]
+    events_path, sources_path, output_path, today = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+    try:
+        datetime.strptime(today, DATE_FMT)
+    except ValueError:
+        print(f"'today' is not a valid 'YYYY-MM-DD' date: {today!r}", file=sys.stderr)
+        sys.exit(1)
 
     with open(events_path) as f:
         events = json.load(f)
@@ -294,8 +364,8 @@ def main():
 
     validate(events)
     validate_sources(sources)
-    subject, body = render_email(events, sources)
-    html_body = render_email_html(events, sources)
+    subject, body = render_email(events, sources, today)
+    html_body = render_email_html(events, sources, today)
 
     with open(output_path, "w") as f:
         json.dump({"subject": subject, "body": body, "htmlBody": html_body}, f, indent=2)
