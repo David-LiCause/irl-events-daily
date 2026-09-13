@@ -1,2 +1,5 @@
 .env
 dev/email_previews/
+events.json
+sources_report.json
+digest_output.json
