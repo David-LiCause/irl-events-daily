@@ -1,6 +1,6 @@
 ---
-name: setup-events-daily
-description: One-time setup for the events-daily project — connects Airtable and Gmail, provisions the Airtable base/tables, populates the Sources table, and creates the daily routine.
+name: setup-irl-events-daily
+description: One-time setup for the irl-events-daily project — connects Airtable and Gmail, provisions the Airtable base/tables, populates the Sources table, and creates the daily routine.
 ---
 
 **This is a prescriptive, step-by-step workflow.** Execute the steps below in order, one at a time — do not skip ahead, reorder, or run steps in parallel. Before moving to the next step, confirm the current one actually completed. If any step is incomplete or cannot be completed (a connector won't connect, a command fails, required info is missing), **stop immediately and flag it to the user** — do not improvise a workaround or continue past it.

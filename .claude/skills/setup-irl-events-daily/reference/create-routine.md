@@ -1,7 +1,7 @@
 # Create the daily routine
 
 ## Requires the user — manual, cannot be done by Claude Code
-**If this is not the user's own original repo, they must fork it first**, then connect *their fork* to Claude's GitHub App, one time per GitHub account: github.com/settings/installations → find the Claude/Claude Code app → Configure → add their fork to its repository access list. A non-owner cannot grant the App access to someone else's repo (e.g. the upstream `David-LiCause/events-daily`) — only to a repo they themselves own, which means forking first if they're not the original owner. Without this, routine creation fails with a 403.
+**If this is not the user's own original repo, they must fork it first**, then connect *their fork* to Claude's GitHub App, one time per GitHub account: github.com/settings/installations → find the Claude/Claude Code app → Configure → add their fork to its repository access list. A non-owner cannot grant the App access to someone else's repo (e.g. the upstream `David-LiCause/irl-events-daily`) — only to a repo they themselves own, which means forking first if they're not the original owner. Without this, routine creation fails with a 403.
 
 **Print this step to the user verbatim and wait for confirmation before continuing** — Claude Code has no way to grant its own GitHub App access.
 
@@ -21,13 +21,13 @@ Everything else below is a fixed, universal constant — safe to reuse as-is reg
 
 | Parameter | Value |
 |---|---|
-| `name` | `"events-daily"` |
+| `name` | `"irl-events-daily"` |
 | `cron_expression` | `"0 11 * * *"` (UTC; = 7am America/New_York — confirm DST offset at creation time, since routines have a 1-hour-minimum interval) |
 | `enabled` | `true` |
 | `mcp_connections[].name` | `"Airtable"` / `"Gmail"` (must match `[a-zA-Z0-9_-]`) |
 | `mcp_connections[].url` | `"https://mcp.airtable.com/mcp"` / `"https://gmailmcp.googleapis.com/mcp/v1"` (fixed hosted MCP endpoints, same for every account) |
 | `job_config.ccr.session_context.model` | `"claude-sonnet-5"` |
-| `job_config.ccr.session_context.allowed_tools` | `["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch"]` — `WebFetch`/`WebSearch` are required: `run-events-daily/SKILL.md` fetches each source URL and, on the fallback path, web-searches for a replacement. Without them the routine can't do its core job. |
+| `job_config.ccr.session_context.allowed_tools` | `["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch"]` — `WebFetch`/`WebSearch` are required: `run-irl-events-daily/SKILL.md` fetches each source URL and, on the fallback path, web-searches for a replacement. Without them the routine can't do its core job. |
 | `job_config.ccr.events` | One `user`-role event — `message.content` is the instruction text below, with the resolved recipient email embedded; give it a fresh lowercase v4 UUID and leave `session_id` empty |
 
 After creation, save the returned routine ID / `https://claude.ai/code/routines/{id}` link for the final summary.
@@ -36,7 +36,7 @@ After creation, save the returned routine ID / `https://claude.ai/code/routines/
 
 ```json
 {
-  "name": "events-daily",
+  "name": "irl-events-daily",
   "cron_expression": "0 11 * * *",
   "enabled": true,
   "mcp_connections": [
@@ -59,7 +59,7 @@ After creation, save the returned routine ID / `https://claude.ai/code/routines/
           "parent_tool_use_id": null,
           "message": {
             "role": "user",
-            "content": "Read the file .claude/skills/run-events-daily/SKILL.md in this repo and carry out the instructions in it exactly. The recipient email for the digest is <this account's DIGEST_RECIPIENT_EMAIL, from .env> — never send it anywhere else."
+            "content": "Read the file .claude/skills/run-irl-events-daily/SKILL.md in this repo and carry out the instructions in it exactly. The recipient email for the digest is <this account's DIGEST_RECIPIENT_EMAIL, from .env> — never send it anywhere else."
           }
         }}
       ]

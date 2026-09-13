@@ -1,5 +1,5 @@
 ---
-name: run-events-daily
+name: run-irl-events-daily
 description: Fetches today's and this week's events from every configured source and emails the user a full digest, split into "Today" and "Coming up this week," with a one-click Google Calendar "Add to Calendar" link per event.
 ---
 
@@ -69,12 +69,12 @@ description: Fetches today's and this week's events from every configured source
 
 6. **Build the digest.** Run:
    ```
-   python3 .claude/skills/run-events-daily/scripts/build_digest.py $SCRATCH_DIR/events.json $SCRATCH_DIR/sources_report.json $SCRATCH_DIR/digest_output.json <today's-date-from-step-1>
+   python3 .claude/skills/run-irl-events-daily/scripts/build_digest.py $SCRATCH_DIR/events.json $SCRATCH_DIR/sources_report.json $SCRATCH_DIR/digest_output.json <today's-date-from-step-1>
    ```
    The script itself is read from this repo, as shown above — only the input/output data files live in `$SCRATCH_DIR`. This validates both input files, splits events into a "Today" section (`Date` equal to the date argument) and a "Coming up this week" section (later dates, grouped by day), builds a Google Calendar quick-add URL for each event, and renders the email into `digest_output.json` (`{"subject": ..., "body": ..., "htmlBody": ...}`) — `body` is the plain-text version, `htmlBody` a styled HTML version (an "Add to Calendar" button per event, plus the same "needs a manual look" and "sources checked" sections). Both end with a "needs a manual look" section listing any `"blocked"` sources (asking the user to visit those URLs directly, since they couldn't be checked automatically), followed by a "sources checked" summary of every source. If it exits non-zero, fix the offending data and rerun — do not proceed to send with unvalidated data.
 
 7. **Send the email.**
-   - Determine the recipient first: if this run's prompt embeds a recipient email (the scheduled routine's prompt does — see `reference/create-routine.md` in the `setup-events-daily` skill), use that address. Otherwise (a manual/local run), read `DIGEST_RECIPIENT_EMAIL` from `.env`. Never fall back to a hardcoded address, and never send anywhere else — this is the project's core safety guarantee (`dev/PRD.md`).
+   - Determine the recipient first: if this run's prompt embeds a recipient email (the scheduled routine's prompt does — see `reference/create-routine.md` in the `setup-irl-events-daily` skill), use that address. Otherwise (a manual/local run), read `DIGEST_RECIPIENT_EMAIL` from `.env`. Never fall back to a hardcoded address, and never send anywhere else — this is the project's core safety guarantee (`dev/PRD.md`).
    - Read `$SCRATCH_DIR/digest_output.json` for `subject`/`body`/`htmlBody`. `build_digest.py` already validated this output deterministically in step 6 — don't re-verify it by splitting it into separate files, re-reading each piece, or otherwise double-checking it before sending; that's redundant work that only adds delay right before the send.
    - Call the Gmail MCP `send_message` tool with exactly these parameters:
      ```json
