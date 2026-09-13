@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Creates the Airtable base and Sources/EventLog tables via the Airtable Web API.
+"""Creates the Airtable base and Sources table via the Airtable Web API.
 
 Usage: make setup-airtable  (reads AIRTABLE_PAT and AIRTABLE_WORKSPACE_ID from .env)
 """
@@ -75,34 +75,6 @@ def main():
     )
     base_id = base["id"]
     print(f"Base created: {base_id}")
-
-    print("Creating EventLog table...")
-    api_request(
-        "POST",
-        f"{API_ROOT}/{base_id}/tables",
-        pat,
-        {
-            "name": "EventLog",
-            "fields": [
-                {"name": "Date", "type": "date", "options": {"dateFormat": {"name": "iso"}}},
-                {"name": "DigestIndex", "type": "number", "options": {"precision": 0}},
-                {"name": "EventTitle", "type": "singleLineText"},
-                {"name": "EventDescription", "type": "multilineText"},
-                {"name": "EventTime", "type": "singleLineText"},
-                {"name": "StartDateTime", "type": "singleLineText"},
-                {"name": "EndDateTime", "type": "singleLineText"},
-                {"name": "AllDay", "type": "checkbox", "options": {"icon": "check", "color": "greenBright"}},
-                {"name": "Location", "type": "singleLineText"},
-                {"name": "Price", "type": "singleLineText"},
-                {"name": "SignupURL", "type": "url"},
-                {"name": "SourceName", "type": "singleLineText"},
-                {"name": "SourceURL", "type": "url"},
-                {"name": "Sent", "type": "checkbox", "options": {"icon": "check", "color": "greenBright"}},
-                {"name": "AddedToCalendar", "type": "checkbox", "options": {"icon": "check", "color": "greenBright"}},
-                {"name": "CalendarEventId", "type": "singleLineText"},
-            ],
-        },
-    )
 
     print(f"\nDone. Base ID: {base_id}")
     print("Select this base for the Airtable connector at claude.ai/customize/connectors.")

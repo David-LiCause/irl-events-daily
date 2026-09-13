@@ -1,11 +1,11 @@
 ---
 name: run-events-daily
-description: Fetches today's events from every configured source, emails the user a full digest with a one-click Google Calendar "Add to Calendar" link per event, and logs the results to Airtable.
+description: Fetches today's and this week's events from every configured source and emails the user a full digest, split into "Today" and "Coming up this week," with a one-click Google Calendar "Add to Calendar" link per event.
 ---
 
 **This is a prescriptive, step-by-step workflow.** Execute the steps below in order, one at a time — do not skip ahead, reorder, or run steps in parallel. Before moving to the next step, confirm the current one actually completed. If any step is incomplete or cannot be completed (a connector won't connect, a command fails, required info is missing), **stop immediately and flag it to the user** — do not improvise a workaround or continue past it.
 
-1. **Determine today's date.** Resolve the current date in **America/New_York** (not UTC — the cloud environment clock is UTC): run `TZ=America/New_York date +%Y-%m-%d` via Bash. Use this single value for the rest of the run to decide "is this event today."
+1. **Determine today's date.** Resolve the current date in **America/New_York** (not UTC — the cloud environment clock is UTC): run `TZ=America/New_York date +%Y-%m-%d` via Bash. This is the start of the pull window — the window runs through today+7 days — and is also passed to `build_digest.py` in step 6 so it knows which events are "today" versus "this week."
 
 2. **Pull sources from Airtable.**
    - If you don't already have the `events-daily` base's ID this session, call the Airtable MCP `search_bases` to find it, then `list_tables_for_base(baseId)` to get the `Sources` table's `tableId`.
@@ -13,20 +13,24 @@ description: Fetches today's events from every configured source, emails the use
    - This call is paginated — if the response includes a `next_cursor`/offset, keep calling with that cursor until none remains, so **every** row is read, not just the first page.
    - For each record returned, capture `Name` and `URL` from its `fields`.
 
-3. **Iterate sources and extract today's events.** For each `Name`/`URL` pair:
+3. **Iterate sources and extract this week's events.** For each `Name`/`URL` pair:
    - Fetch the URL.
-   - Extract any events listed on the page (title, date/time, location, signup/details link).
-   - Filter to only events matching today's date from step 1 — discard everything else.
+   - Extract any events listed on the page: title, date/time, location, signup/details link, and a short description (a sentence or two about the event, if the page provides one — e.g. an event blurb or summary). The description must come from the page itself — leave it empty if the page doesn't have one, never invent or paraphrase one from just the title.
+   - Filter to only events dated from today through today+7 days (inclusive) from step 1 — discard everything else.
    - Attach the source `Name`/`URL` to each surviving event as `SourceName`/`SourceURL`.
+   - Record this source's outcome for step 5's `sources_report.json`: `"ok"` if the page fetched and parsed cleanly (even if it simply had zero events in the window), or pending-retry if the fetch/parse failed (a 403, error, redirect, unparseable layout, or implausibly-zero results across the whole week) — resolve pending ones in step 4.
 
-4. **Fallback when a source URL doesn't yield a clear events list.** Trigger condition: fetching the URL returns no recognizable events list (page error, redirect, layout the extraction can't parse, or zero events found where that's implausible). Fallback: web-search for the organization's actual current events/calendar page (search on the `Name`) to find a better URL, then retry extraction (step 3) against that URL for this run only. Flag any source where the fallback was used — don't silently overwrite its `Sources` row — and call it out in your final summary at the end of this run so the user knows that source's URL may need updating.
+4. **Fallback when a source URL doesn't yield a clear events list.** Trigger condition: fetching the URL returns no recognizable events list (page error, redirect, layout the extraction can't parse, or zero events found across the full 7-day window where that's implausible for an active org/venue). Fallback: web-search for the organization's actual current events/calendar page (search on the `Name`) to find a better URL, then retry extraction (step 3) against that URL for this run only.
+   - **If the fallback succeeds:** record the source as `"ok"` — but still flag it (don't silently overwrite its `Sources` row) and call it out in your final summary so the user knows that source's URL may need updating.
+   - **If the fallback also fails** (no better URL found, or it fails too — including a 403 that isn't fixable by finding a different URL): record the source as `"blocked"` with a short `Reason` (e.g. `"403 Forbidden"`, `"no parseable events list found"`). This source could not be checked automatically today — it gets surfaced to the user in the email itself (step 5/6), not just the chat summary.
 
-5. **Write the extracted events to `events.json`** (a scratch file in the current working directory): a flat JSON array, one object per event, with these exact fields (matching `EventLog` Airtable columns):
+5. **Write `events.json` and `sources_report.json`** (scratch files in the current working directory).
+
+   `events.json` — a flat JSON array, one object per event, with these exact fields:
    ```json
    [
      {
        "Date": "YYYY-MM-DD",
-       "DigestIndex": null,
        "EventTitle": "string",
        "EventDescription": "string",
        "EventTime": "string",
@@ -37,39 +41,44 @@ description: Fetches today's events from every configured source, emails the use
        "Price": "string or null",
        "SignupURL": "string or null",
        "SourceName": "string",
-       "SourceURL": "string",
-       "Sent": false,
-       "AddedToCalendar": false,
-       "CalendarEventId": null
+       "SourceURL": "string"
      }
    ]
    ```
-   - `StartDateTime`/`EndDateTime` are local **America/New_York** time, no offset. `EventTime` stays a human-readable string for display in Airtable.
+   - `EventDescription` is the short description captured in step 3 — `""` if the page didn't have one. It's shown in the email for every event, so don't fabricate one just to fill it.
+   - `StartDateTime`/`EndDateTime` are local **America/New_York** time, no offset. `EventTime` stays a human-readable string for display in the email.
    - `EndDateTime: null` means "unknown" — `build_digest.py` defaults to a 2-hour duration.
    - `AllDay: true` events omit time-of-day.
-   - `DigestIndex`/`Sent`/`AddedToCalendar`/`CalendarEventId` are placeholders at write time — leave them as shown above.
+
+   `sources_report.json` — a flat JSON array, one object per source **from the full `Sources` list in step 2** (every source appears exactly once, regardless of outcome):
+   ```json
+   [
+     {"Name": "string", "URL": "string", "Status": "ok"},
+     {"Name": "string", "URL": "string", "Status": "blocked", "Reason": "string"}
+   ]
+   ```
+   - `Status` is `"ok"` or `"blocked"` only (per step 3/4's outcome for that source).
+   - `URL` is the one that actually worked for `"ok"` sources (original or fallback-found); for `"blocked"` sources, the original `Sources`-table URL.
+   - `Reason` is required for `"blocked"` sources, omitted for `"ok"` ones.
 
 6. **Build the digest.** Run:
    ```
-   python3 .claude/skills/run-events-daily/scripts/build_digest.py events.json digest_output.json
+   python3 .claude/skills/run-events-daily/scripts/build_digest.py events.json sources_report.json digest_output.json <today's-date-from-step-1>
    ```
-   This validates `events.json`, builds a Google Calendar quick-add URL for each event, and renders the email into `digest_output.json` (`{"subject": ..., "body": ...}`). If it exits non-zero, fix the offending event data in `events.json` and rerun — do not proceed to send with unvalidated data.
+   This validates both input files, splits events into a "Today" section (`Date` equal to the date argument) and a "Coming up this week" section (later dates, grouped by day), builds a Google Calendar quick-add URL for each event, and renders the email into `digest_output.json` (`{"subject": ..., "body": ..., "htmlBody": ...}`) — `body` is the plain-text version, `htmlBody` a styled HTML version (an "Add to Calendar" button per event, plus the same "needs a manual look" and "sources checked" sections). Both end with a "needs a manual look" section listing any `"blocked"` sources (asking the user to visit those URLs directly, since they couldn't be checked automatically), followed by a "sources checked" summary of every source. If it exits non-zero, fix the offending data and rerun — do not proceed to send with unvalidated data.
 
 7. **Send the email.**
    - Determine the recipient first: if this run's prompt embeds a recipient email (the scheduled routine's prompt does — see `reference/create-routine.md` in the `setup-events-daily` skill), use that address. Otherwise (a manual/local run), read `DIGEST_RECIPIENT_EMAIL` from `.env`. Never fall back to a hardcoded address, and never send anywhere else — this is the project's core safety guarantee (`dev/PRD.md`).
-   - Read `digest_output.json` for `subject`/`body`.
+   - Read `digest_output.json` for `subject`/`body`/`htmlBody`.
    - Call the Gmail MCP `send_message` tool with exactly these parameters:
      ```json
      {
        "to": ["<recipient address from above>"],
        "subject": "<subject from digest_output.json, verbatim>",
-       "body": "<body from digest_output.json, verbatim>"
+       "body": "<body from digest_output.json, verbatim>",
+       "htmlBody": "<htmlBody from digest_output.json, verbatim>"
      }
      ```
-   - Do not set `cc`, `bcc`, `htmlBody`, `draftId`, or any other parameter. Do not reformat or rewrite `subject`/`body` — send them exactly as written.
+   - Do not set `cc`, `bcc`, `draftId`, or any other parameter. Do not reformat or rewrite `subject`/`body`/`htmlBody` — send them exactly as written.
 
-8. **Log the run to `EventLog`.** Write one row per event (from `events.json`) to the `EventLog` table via the Airtable connector: same fields, but set `Sent: true` and assign `DigestIndex` as each event's 1-based position in the digest. Leave `AddedToCalendar`/`CalendarEventId` blank — nothing populates them, since adding an event to the calendar happens directly in the user's browser when they click a quick-add link, with no routine involvement.
-
-9. **Prune old `EventLog` rows.** Read all `EventLog` rows via the Airtable connector and delete any whose `Date` is more than 7 days before today's date (from step 1) — this keeps `EventLog` a rolling ~7-day window (see `dev/PRD.md` §6.2). This is routine maintenance, not event dedup, and must not block the digest: if it fails, note that in the final summary rather than retrying or aborting the run.
-
-10. **Report a final summary** to the user: number of sources checked, number of events found, any sources where the step-4 fallback was used (so their `Sources` table URL may need updating), and how many old `EventLog` rows were pruned in step 9.
+8. **Report a final summary** to the user: number of sources checked, number of events found today and this week, and any sources where the step-4 fallback was used (so their `Sources` table URL may need updating).
