@@ -4,14 +4,14 @@ see and iterate on what the email looks like without running the full skill
 or touching Airtable/Gmail.
 
 Usage: python3 scripts/preview_email.py  (or `make preview-email`)
-Writes one .txt file per scenario to dev/email_previews/.
+Writes one .txt file per scenario to docs/email_previews/.
 """
 import importlib.util
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BUILD_DIGEST_PATH = REPO_ROOT / ".claude/skills/run-irl-events-daily/scripts/build_digest.py"
-OUTPUT_DIR = REPO_ROOT / "dev" / "email_previews"
+OUTPUT_DIR = REPO_ROOT / "docs" / "email_previews"
 
 TODAY = "2026-09-12"
 
