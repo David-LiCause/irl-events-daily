@@ -145,7 +145,7 @@ def build_subject(today_count, upcoming_count):
 
 
 def render_event_block_text(event):
-    lines = [event["EventTitle"], event["SourceName"]]
+    lines = [event["EventTitle"], event["SourceName"], format_date_header(event["Date"])]
     if event.get("EventTime"):
         lines.append(event["EventTime"])
     lines.append(event["Location"])
@@ -205,7 +205,7 @@ def esc(value):
 
 
 def render_event_card_html(event):
-    detail_lines = []
+    detail_lines = [esc(format_date_header(event["Date"]))]
     if event.get("EventTime"):
         detail_lines.append(esc(event["EventTime"]))
     detail_lines.append(esc(event["Location"]))

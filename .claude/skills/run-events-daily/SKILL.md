@@ -5,7 +5,13 @@ description: Fetches today's and this week's events from every configured source
 
 **This is a prescriptive, step-by-step workflow.** Execute the steps below in order, one at a time — do not skip ahead, reorder, or run steps in parallel. Before moving to the next step, confirm the current one actually completed. If any step is incomplete or cannot be completed (a connector won't connect, a command fails, required info is missing), **stop immediately and flag it to the user** — do not improvise a workaround or continue past it.
 
-1. **Determine today's date.** Resolve the current date in **America/New_York** (not UTC — the cloud environment clock is UTC): run `TZ=America/New_York date +%Y-%m-%d` via Bash. This is the start of the pull window — the window runs through today+7 days — and is also passed to `build_digest.py` in step 6 so it knows which events are "today" versus "this week."
+**Never run any git command** (`status`, `add`, `commit`, `push`, `checkout`, or any other) as part of this skill, for any reason — including to "clean up" scratch files or resolve an unexpected repository state. This routine only ever reads this repo's own files and Airtable, and writes to Airtable/Gmail; it must never modify the git repository. If the working tree or repo state looks unexpected, leave it alone and mention it in the final summary instead of acting on it.
+
+**Load every tool this run will need up front, in as few batched calls as possible** — Airtable, Gmail, and web fetch/search — rather than loading them one at a time at each point of first use. Loading Gmail's tools only when step 7 is reached means that load latency lands at the very end, after sources/events are already done, which is what made a previous run feel slow to send.
+
+1. **Determine today's date, and set up a scratch directory for this run.**
+   - Resolve the current date in **America/New_York** (not UTC — the cloud environment clock is UTC): run `TZ=America/New_York date +%Y-%m-%d` via Bash. This is the start of the pull window — the window runs through today+7 days — and is also passed to `build_digest.py` in step 6 so it knows which events are "today" versus "this week."
+   - Create a scratch directory for this run's intermediate files, **outside this repo's checkout**: `SCRATCH_DIR=$(mktemp -d)`. Use `$SCRATCH_DIR` for every file written in steps 5–7 below — never write scratch or output files inside this repository's working tree (doing so is what caused an earlier run to notice untracked files and go run git commands to "fix" it — exactly what the rule above forbids).
 
 2. **Pull sources from Airtable.**
    - If you don't already have the `events-daily` base's ID this session, call the Airtable MCP `search_bases` to find it, then `list_tables_for_base(baseId)` to get the `Sources` table's `tableId`.
@@ -24,7 +30,7 @@ description: Fetches today's and this week's events from every configured source
    - **If the fallback succeeds:** record the source as `"ok"` — but still flag it (don't silently overwrite its `Sources` row) and call it out in your final summary so the user knows that source's URL may need updating.
    - **If the fallback also fails** (no better URL found, or it fails too — including a 403 that isn't fixable by finding a different URL): record the source as `"blocked"` with a short `Reason` (e.g. `"403 Forbidden"`, `"no parseable events list found"`). This source could not be checked automatically today — it gets surfaced to the user in the email itself (step 5/6), not just the chat summary.
 
-5. **Write `events.json` and `sources_report.json`** (scratch files in the current working directory).
+5. **Write `$SCRATCH_DIR/events.json` and `$SCRATCH_DIR/sources_report.json`** (in the scratch directory from step 1 — not this repo's checkout).
 
    `events.json` — a flat JSON array, one object per event, with these exact fields:
    ```json
@@ -63,13 +69,13 @@ description: Fetches today's and this week's events from every configured source
 
 6. **Build the digest.** Run:
    ```
-   python3 .claude/skills/run-events-daily/scripts/build_digest.py events.json sources_report.json digest_output.json <today's-date-from-step-1>
+   python3 .claude/skills/run-events-daily/scripts/build_digest.py $SCRATCH_DIR/events.json $SCRATCH_DIR/sources_report.json $SCRATCH_DIR/digest_output.json <today's-date-from-step-1>
    ```
-   This validates both input files, splits events into a "Today" section (`Date` equal to the date argument) and a "Coming up this week" section (later dates, grouped by day), builds a Google Calendar quick-add URL for each event, and renders the email into `digest_output.json` (`{"subject": ..., "body": ..., "htmlBody": ...}`) — `body` is the plain-text version, `htmlBody` a styled HTML version (an "Add to Calendar" button per event, plus the same "needs a manual look" and "sources checked" sections). Both end with a "needs a manual look" section listing any `"blocked"` sources (asking the user to visit those URLs directly, since they couldn't be checked automatically), followed by a "sources checked" summary of every source. If it exits non-zero, fix the offending data and rerun — do not proceed to send with unvalidated data.
+   The script itself is read from this repo, as shown above — only the input/output data files live in `$SCRATCH_DIR`. This validates both input files, splits events into a "Today" section (`Date` equal to the date argument) and a "Coming up this week" section (later dates, grouped by day), builds a Google Calendar quick-add URL for each event, and renders the email into `digest_output.json` (`{"subject": ..., "body": ..., "htmlBody": ...}`) — `body` is the plain-text version, `htmlBody` a styled HTML version (an "Add to Calendar" button per event, plus the same "needs a manual look" and "sources checked" sections). Both end with a "needs a manual look" section listing any `"blocked"` sources (asking the user to visit those URLs directly, since they couldn't be checked automatically), followed by a "sources checked" summary of every source. If it exits non-zero, fix the offending data and rerun — do not proceed to send with unvalidated data.
 
 7. **Send the email.**
    - Determine the recipient first: if this run's prompt embeds a recipient email (the scheduled routine's prompt does — see `reference/create-routine.md` in the `setup-events-daily` skill), use that address. Otherwise (a manual/local run), read `DIGEST_RECIPIENT_EMAIL` from `.env`. Never fall back to a hardcoded address, and never send anywhere else — this is the project's core safety guarantee (`dev/PRD.md`).
-   - Read `digest_output.json` for `subject`/`body`/`htmlBody`.
+   - Read `$SCRATCH_DIR/digest_output.json` for `subject`/`body`/`htmlBody`. `build_digest.py` already validated this output deterministically in step 6 — don't re-verify it by splitting it into separate files, re-reading each piece, or otherwise double-checking it before sending; that's redundant work that only adds delay right before the send.
    - Call the Gmail MCP `send_message` tool with exactly these parameters:
      ```json
      {
