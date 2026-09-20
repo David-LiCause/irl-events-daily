@@ -68,6 +68,7 @@ def main():
                     "fields": [
                         {"name": "Name", "type": "singleLineText"},
                         {"name": "URL", "type": "url"},
+                        {"name": "Instructions", "type": "multilineText"},
                     ],
                 }
             ],
