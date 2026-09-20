@@ -10,11 +10,12 @@
    - **If they gave only a name:** search for the org's events page, fetch and validate each candidate, and propose the best match.
    - Show the user the URL you settled on plus a one-line note on what you saw on the page confirming it's an events list, before moving to the next org.
    - Multiple relevant URLs for one org become multiple rows (same `Name`, different `URL`) — validate each individually.
+   - **Ask whether they want any source-specific instructions for this org/venue** — e.g. events to always filter out ("skip anything Mon–Fri between 9 AM and 5 PM") or to keep ("only keep hikes"). This is optional; most sources have none. If they give one, restate it back in explicit terms (days, times, keywords — America/New_York) so it can't be misread, and record it as this row's `Instructions`. Leave it empty otherwise.
 
 3. **Ask if there's another org/venue to add**, and repeat step 2 for it. Keep looping until the user says they're done — this list is expected to have multiple entries.
 
-4. **Confirm the complete list back to the user before writing anything.** Show every org/venue with the final URL(s) you'll be using for each, exactly as they'll be written to Airtable, and ask for explicit confirmation. If the user wants changes, make them and re-confirm — do not proceed to step 5 on an implicit or partial yes.
+4. **Confirm the complete list back to the user before writing anything.** Show every org/venue with the final URL(s) and any `Instructions` you'll be using for each, exactly as they'll be written to Airtable, and ask for explicit confirmation. If the user wants changes, make them and re-confirm — do not proceed to step 5 on an implicit or partial yes.
 
-5. **Write one row per org/URL pair** via the Airtable connector (`Name`, `URL` columns) — only after step 4's confirmation.
+5. **Write one row per org/URL pair** via the Airtable connector (`Name`, `URL`, and `Instructions` columns — leave `Instructions` empty when there are none) — only after step 4's confirmation.
 
 6. **Read the table back and show the user the final row count/contents** to verify the writes match what was confirmed.

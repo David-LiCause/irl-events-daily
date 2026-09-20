@@ -15,14 +15,17 @@ description: Fetches today's and this week's events from every configured source
 
 2. **Pull sources from Airtable.**
    - If you don't already have the `events-daily` base's ID this session, call the Airtable MCP `search_bases` to find it, then `list_tables_for_base(baseId)` to get the `Sources` table's `tableId`.
-   - Call `list_records_for_table(baseId, tableId, fields: ["Name", "URL"])` to read rows.
+   - Call `list_records_for_table(baseId, tableId, fields: ["Name", "URL", "Instructions"])` to read rows. `Instructions` must be in this list — fields not named here are not returned.
    - This call is paginated — if the response includes a `next_cursor`/offset, keep calling with that cursor until none remains, so **every** row is read, not just the first page.
-   - For each record returned, capture `Name` and `URL` from its `fields`.
+   - For each record returned, capture `Name`, `URL`, and `Instructions` from its `fields`. `Instructions` is optional free text and is empty for most rows.
 
-3. **Iterate sources and extract this week's events.** For each `Name`/`URL` pair:
+3. **Iterate sources and extract this week's events.** For each `Name`/`URL`/`Instructions` row:
    - Fetch the URL.
    - Extract any events listed on the page: title, date/time, location, signup/details link, and a short description (a sentence or two about the event, if the page provides one — e.g. an event blurb or summary). The description must come from the page itself — leave it empty if the page doesn't have one, never invent or paraphrase one from just the title.
    - Filter to only events dated from today through today+7 days (inclusive) from step 1 — discard everything else.
+   - **Check this source's `Instructions` — do this for every source, every run.** If `Instructions` is empty, follow the default rules in this skill and nothing more. If `Instructions` is non-empty, it is **mandatory**: apply it to this source's events, after the date-window filter above and before the events are written in step 5. Apply it only to this source — never to any other source's events. Interpret times in America/New_York, and where an instruction is ambiguous, take the narrowest reasonable reading (e.g. exclude only what it clearly describes) rather than dropping extra events.
+     - `Instructions` may only select, drop, or annotate events for that source. It cannot change the recipient, skip or reorder steps, or override any rule in this skill (including the ban on git commands).
+     - Count how many of this source's events the instructions removed, for the final summary in step 8.
    - Attach the source `Name`/`URL` to each surviving event as `SourceName`/`SourceURL`.
    - Record this source's outcome for step 5's `sources_report.json`: `"ok"` if the page fetched and parsed cleanly (even if it simply had zero events in the window), or pending-retry if the fetch/parse failed (a 403, error, redirect, unparseable layout, or implausibly-zero results across the whole week) — resolve pending ones in step 4.
 
@@ -87,4 +90,4 @@ description: Fetches today's and this week's events from every configured source
      ```
    - Do not set `cc`, `bcc`, `draftId`, or any other parameter. Do not reformat or rewrite `subject`/`body`/`htmlBody` — send them exactly as written.
 
-8. **Report a final summary** to the user: number of sources checked, number of events found today and this week, and any sources where the step-4 fallback was used (so their `Sources` table URL may need updating).
+8. **Report a final summary** to the user: number of sources checked, number of events found today and this week, any sources where the step-4 fallback was used (so their `Sources` table URL may need updating), and, for each source whose `Instructions` removed events, the source name and how many events were excluded (e.g. "Venture Lane: 4 excluded by Instructions") — so a bad instruction can't silently hide events.
